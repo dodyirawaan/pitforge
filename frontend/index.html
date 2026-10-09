@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PitForge</title>
+  </head>
+  <body>
+    <aside id="panel">
+      <h1>PitForge</h1>
+      <p class="tagline">Open-pit block model viewer</p>
+
+      <section>
+        <h2>Model</h2>
+        <label class="button">
+          Load CSV
+          <input id="file-input" type="file" accept=".csv,.txt" hidden />
+        </label>
+        <button id="sample-button" type="button">Sample model</button>
+        <p id="status" role="status"></p>
+      </section>
+
+      <section>
+        <h2>Cutoff grade</h2>
+        <input id="cutoff" type="range" />
+        <p><span id="cutoff-value"></span></p>
+      </section>
+
+      <section>
+        <h2 id="legend-title">Grade</h2>
+        <div id="legend-bar"></div>
+        <div class="legend-range">
+          <span id="legend-min"></span>
+          <span id="legend-max"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Summary</h2>
+        <dl id="stats"></dl>
+      </section>
+
+      <p class="hint">Drag to orbit · right-drag to pan · scroll to zoom</p>
+    </aside>
+    <main id="viewport"></main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

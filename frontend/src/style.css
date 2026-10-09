@@ -1,0 +1,145 @@
+:root {
+  --bg: #12161c;
+  --panel: #1b212a;
+  --border: #2c3542;
+  --text: #e6eaf0;
+  --muted: #8f9bab;
+  --accent: #e0a23a;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  background: var(--bg);
+}
+
+#panel {
+  width: 280px;
+  flex-shrink: 0;
+  padding: 20px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+#viewport {
+  flex: 1;
+  min-width: 0;
+}
+
+#viewport canvas {
+  display: block;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.02em;
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+p {
+  margin: 8px 0 0;
+}
+
+section {
+  margin-top: 24px;
+}
+
+.tagline,
+.hint {
+  color: var(--muted);
+}
+
+.hint {
+  margin-top: 28px;
+  font-size: 12px;
+}
+
+button,
+.button {
+  display: inline-block;
+  padding: 7px 12px;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.button {
+  color: #1a1305;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+button:hover {
+  border-color: var(--muted);
+}
+
+#status {
+  min-height: 1.4em;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#status.error {
+  color: #ff8a7a;
+}
+
+input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+#legend-bar {
+  height: 12px;
+  border-radius: 3px;
+}
+
+.legend-range {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
