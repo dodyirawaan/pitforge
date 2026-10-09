@@ -13,12 +13,17 @@ export interface PeriodSummary {
   cashFlow: number
   /** Cash flow discounted to the start of the schedule. */
   discounted: number
+  /** First and last pushback mined in the period; both 0 without pushbacks. */
+  firstPushback: number
+  lastPushback: number
 }
 
 export interface Schedule {
   /** Period in which each block is mined, starting at 1; 0 for blocks outside the pit. */
   periodOf: Uint16Array
   periods: PeriodSummary[]
+  /** Whether the pit was mined pushback by pushback. */
+  hasPushbacks: boolean
   undiscounted: number
   npv: number
 }
@@ -26,7 +31,11 @@ export interface Schedule {
 /**
  * Schedules a pit bench by bench from the top down, filling each period up to
  * the mining rate. Within a bench, mining starts nearest the pit's centre.
- * Mining top-down always respects precedence, but the sequence is not
+ * Given `pushbackOf`, each pushback is mined out in turn, top-down, before the
+ * next one starts.
+ *
+ * Mining top-down always respects precedence, and so does mining pushbacks in
+ * order because each one completes a valid pit. The sequence is not otherwise
  * optimised for value. Ore is any block that pays to process, and cash flows
  * are discounted from the end of each period.
  */
@@ -37,6 +46,7 @@ export function buildSchedule(
   economics: EconomicParams,
   tonnesPerPeriod: number,
   discountRate: number,
+  pushbackOf?: Uint8Array,
 ): Schedule {
   const { count, positions, grades, size } = model
   const blockTonnes = size[0] * size[1] * size[2] * density
@@ -53,7 +63,11 @@ export function buildSchedule(
   centreX /= order.length || 1
   centreY /= order.length || 1
   const distance = (i: number) => (positions[i * 3] - centreX) ** 2 + (positions[i * 3 + 1] - centreY) ** 2
-  order.sort((a, b) => positions[b * 3 + 2] - positions[a * 3 + 2] || distance(a) - distance(b))
+  const pushback = (i: number) => (pushbackOf ? pushbackOf[i] : 0)
+  order.sort(
+    (a, b) =>
+      pushback(a) - pushback(b) || positions[b * 3 + 2] - positions[a * 3 + 2] || distance(a) - distance(b),
+  )
 
   const periodOf = new Uint16Array(count)
   const periods: PeriodSummary[] = []
@@ -73,12 +87,15 @@ export function buildSchedule(
         oreGrade: NaN,
         cashFlow: 0,
         discounted: 0,
+        firstPushback: pushback(block),
+        lastPushback: pushback(block),
       })
       oreBlocks.push(0)
       gradeSums.push(0)
     }
     periodOf[block] = index + 1
     const summary = periods[index]
+    summary.lastPushback = pushback(block)
     const margin = processingMargin(grades[block], economics)
     summary.tonnes += blockTonnes
     if (margin > 0) {
@@ -103,5 +120,5 @@ export function buildSchedule(
     npv += summary.discounted
   })
 
-  return { periodOf, periods, undiscounted, npv }
+  return { periodOf, periods, hasPushbacks: pushbackOf !== undefined, undiscounted, npv }
 }

@@ -33,6 +33,14 @@
           <span id="legend-min"></span>
           <span id="legend-max"></span>
         </div>
+        <label class="field">
+          <span class="field-head"><span>Colour blocks by</span></span>
+          <select id="colour-mode">
+            <option value="grade">Grade</option>
+            <option value="pushback">Pushback</option>
+            <option value="period">Period mined</option>
+          </select>
+        </label>
       </section>
 
       <section>
@@ -64,6 +72,7 @@
         <p id="break-even" class="note"></p>
         <button id="optimise-button" type="button">Run optimisation</button>
         <p id="optimise-status" class="note" role="status"></p>
+        <div id="pushback-controls"></div>
         <dl id="optimise-results"></dl>
       </section>
 
@@ -71,7 +80,6 @@
         <h2>Scheduling</h2>
         <label class="check"><input id="schedule-enabled" type="checkbox" /> Schedule the pit</label>
         <div id="schedule-controls"></div>
-        <label class="check"><input id="colour-by-period" type="checkbox" /> Colour blocks by period</label>
         <p id="schedule-summary" class="note"></p>
       </section>
 

@@ -7,6 +7,8 @@ import type { BlockModel } from './model/BlockModel.ts'
 import { parseBlockModelCsv } from './model/csv.ts'
 import { blockValues, breakEvenGrade, summarisePit } from './optimise/economics.ts'
 import type { EconomicParams, PitEconomics } from './optimise/economics.ts'
+import { assignPushbacks } from './optimise/pushbacks.ts'
+import type { NestedShells } from './optimise/pushbacks.ts'
 import { runOptimiser } from './optimise/runOptimiser.ts'
 import { buildSchedule } from './schedule/schedule.ts'
 import { renderScheduleTable } from './ui/scheduleTable.ts'
@@ -22,10 +24,14 @@ import { Viewer } from './viewer/Viewer.ts'
 
 type BlockMode = 'remaining' | 'mined' | 'all'
 type PitSource = 'design' | 'optimised'
+type ColourMode = 'grade' | 'pushback' | 'period'
 
 interface OptimisedShell {
-  mined: Uint8Array
-  /** Tonnage and value under the inputs the shell was optimised with. */
+  /** The ultimate pit and the nested shells inside it. */
+  shells: NestedShells
+  /** Block values, block tonnage and pit totals under the inputs of the run. */
+  values: Float64Array
+  blockTonnes: number
   economics: PitEconomics
 }
 
@@ -71,7 +77,8 @@ const optimiseResults = element('optimise-results')
 const pitSource = element<HTMLSelectElement>('pit-source')
 const scheduleEnabled = element<HTMLInputElement>('schedule-enabled')
 const scheduleControls = element('schedule-controls')
-const colourByPeriod = element<HTMLInputElement>('colour-by-period')
+const colourMode = element<HTMLSelectElement>('colour-mode')
+const pushbackControls = element('pushback-controls')
 const scheduleSummary = element('schedule-summary')
 const schedulePanel = element('schedule-panel')
 const playButton = element<HTMLButtonElement>('play-button')
@@ -99,6 +106,9 @@ let periodCount = 0
 let playTimer: number | undefined
 const UNSCHEDULED_COLOUR: [number, number, number] = [0.33, 0.36, 0.42]
 const PLAYBACK_INTERVAL = 700
+let pushbackTarget = 4
+/** Fractions of the price at which nested shells are optimised, highest first. */
+const REVENUE_FACTORS = Array.from({ length: 10 }, (_, i) => 1 - (i * 0.7) / 9)
 
 function formatGrade(value: number): string {
   return value.toFixed(2)
@@ -144,11 +154,14 @@ function refresh(): void {
   const pit = pitEnabled.checked ? new PitDesign(session.pit) : null
   const designMined = pit ? computeMined(model, pit) : null
   const source = pitSource.value as PitSource
-  const mined = source === 'optimised' ? (session.shell?.mined ?? null) : designMined
+  const mined = source === 'optimised' ? (session.shell?.shells.mined ?? null) : designMined
+  const pushbacks = session.shell ? assignPushbacks(session.shell.shells, pushbackTarget) : null
+  // Pushbacks only apply while the optimised shell is the pit in use.
+  const pushbackOf = source === 'optimised' ? pushbacks?.phaseOf : undefined
 
   const schedule =
     scheduleEnabled.checked && mined
-      ? buildSchedule(model, mined, density, economics, miningRate, discountRate)
+      ? buildSchedule(model, mined, density, economics, miningRate, discountRate, pushbackOf)
       : null
   periodCount = schedule ? schedule.periods.length : 0
   const shownPeriod = Math.min(playPeriod ?? periodCount, periodCount)
@@ -156,13 +169,22 @@ function refresh(): void {
   const isMined = schedule
     ? (i: number) => schedule.periodOf[i] > 0 && schedule.periodOf[i] <= shownPeriod
     : (i: number) => mined !== null && mined[i] === 1
-  const periodColours = schedule !== null && colourByPeriod.checked
-  const colourOf = periodColours
-    ? (i: number) =>
-        schedule.periodOf[i] > 0
-          ? gradeColor(periodCount > 1 ? (schedule.periodOf[i] - 1) / (periodCount - 1) : 0)
-          : UNSCHEDULED_COLOUR
-    : undefined
+  // Colour by sequence number along the same ramp as the grades; blocks
+  // without a number are grey. Falls back to grade when there is no sequence.
+  const sequenceColour = (index: number, count: number) =>
+    index > 0 ? gradeColor(count > 1 ? (index - 1) / (count - 1) : 0) : UNSCHEDULED_COLOUR
+  let colouring = colourMode.value as ColourMode
+  let colourCount = 0
+  let colourOf: ((i: number) => [number, number, number]) | undefined
+  if (colouring === 'period' && schedule) {
+    colourCount = periodCount
+    colourOf = (i) => sequenceColour(schedule.periodOf[i], periodCount)
+  } else if (colouring === 'pushback' && pushbacks && pushbackOf) {
+    colourCount = pushbacks.count
+    colourOf = (i) => sequenceColour(pushbackOf[i], pushbacks.count)
+  } else {
+    colouring = 'grade'
+  }
 
   const shown = view.setVisible((i) => {
     if (model.grades[i] < cutoffGrade) return false
@@ -170,9 +192,10 @@ function refresh(): void {
     return (mode === 'mined') === isMined(i)
   }, colourOf)
 
-  legendTitle.textContent = periodColours ? 'Period mined' : model.gradeName
-  legendMin.textContent = periodColours ? '1' : formatGrade(model.gradeMin)
-  legendMax.textContent = periodColours ? String(periodCount) : formatGrade(model.gradeMax)
+  const legendTitles = { grade: model.gradeName, pushback: 'Pushback', period: 'Period mined' }
+  legendTitle.textContent = legendTitles[colouring]
+  legendMin.textContent = colouring === 'grade' ? formatGrade(model.gradeMin) : '1'
+  legendMax.textContent = colouring === 'grade' ? formatGrade(model.gradeMax) : String(colourCount)
 
   schedulePanel.hidden = schedule === null
   if (schedule) {
@@ -231,6 +254,18 @@ function refresh(): void {
       ['Shell waste', formatTonnes(shell.wasteTonnes)],
       ['Shell strip ratio', formatRatio(shell.stripRatio)],
     )
+    if (pushbacks && pushbacks.count > 1) {
+      const blocks = new Array<number>(pushbacks.count + 1).fill(0)
+      const value = new Array<number>(pushbacks.count + 1).fill(0)
+      for (let i = 0; i < model.count; i++) {
+        blocks[pushbacks.phaseOf[i]]++
+        value[pushbacks.phaseOf[i]] += session.shell.values[i]
+      }
+      for (let phase = 1; phase <= pushbacks.count; phase++) {
+        const tonnes = formatTonnes(blocks[phase] * session.shell.blockTonnes)
+        rows.push([`Pushback ${phase}`, `${tonnes} · ${formatMoney(value[phase])}`])
+      }
+    }
   }
   if (designMined) {
     rows.push(['Design value', formatMoney(summarisePit(model, designMined, density, economics).value)])
@@ -288,11 +323,19 @@ async function optimise(): Promise<void> {
   setOptimiseStatus('Optimising…')
   const started = performance.now()
   try {
-    const values = blockValues(current.model, inputDensity, inputs)
-    const mined = await runOptimiser(current.model, values, slopeAngle)
+    const valueSets = REVENUE_FACTORS.map((factor) =>
+      blockValues(current.model, inputDensity, { ...inputs, price: inputs.price * factor }),
+    )
+    const shells = await runOptimiser(current.model, valueSets, slopeAngle)
     // A different model may have been loaded while the optimiser was running.
     if (session !== current) return
-    current.shell = { mined, economics: summarisePit(current.model, mined, inputDensity, inputs) }
+    const [dx, dy, dz] = current.model.size
+    current.shell = {
+      shells,
+      values: valueSets[0],
+      blockTonnes: dx * dy * dz * inputDensity,
+      economics: summarisePit(current.model, shells.mined, inputDensity, inputs),
+    }
     pitSource.value = 'optimised'
     setOptimiseStatus(`Optimised in ${((performance.now() - started) / 1000).toFixed(1)} s.`)
     refresh()
@@ -321,6 +364,14 @@ function buildEconomicControls(): void {
     (value) => {
       slopeAngle = value
       economicsChanged()
+    },
+  )
+  pushbackTarget = addSlider(
+    pushbackControls,
+    { label: 'Pushbacks', min: 1, max: 8, step: 1, value: pushbackTarget },
+    (value) => {
+      pushbackTarget = value
+      refresh()
     },
   )
 }
@@ -444,7 +495,7 @@ cutoff.addEventListener('input', refresh)
 pitEnabled.addEventListener('change', refresh)
 pitSource.addEventListener('change', refresh)
 scheduleEnabled.addEventListener('change', refresh)
-colourByPeriod.addEventListener('change', refresh)
+colourMode.addEventListener('change', refresh)
 playButton.addEventListener('click', togglePlayback)
 periodSlider.addEventListener('input', () => showPeriod(Number(periodSlider.value)))
 optimiseButton.addEventListener('click', optimise)

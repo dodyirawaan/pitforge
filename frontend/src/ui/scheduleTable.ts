@@ -2,6 +2,7 @@ import type { Schedule } from '../schedule/schedule.ts'
 
 const HEADINGS = [
   'Period',
+  'Pushback',
   'Rock (Mt)',
   'Ore (Mt)',
   'Waste (Mt)',
@@ -33,8 +34,10 @@ export function renderScheduleTable(
   currentPeriod: number,
   onSelect: (period: number) => void,
 ): void {
+  // The pushback column is the second one; leave it out when there are none.
+  const columns = <T>(cells: T[]) => (schedule.hasPushbacks ? cells : cells.filter((_, i) => i !== 1))
   const head = document.createElement('thead')
-  head.append(row(HEADINGS, 'th'))
+  head.append(row(columns(HEADINGS), 'th'))
 
   const body = document.createElement('tbody')
   let cumulative = 0
@@ -46,9 +49,14 @@ export function renderScheduleTable(
     tonnes += summary.tonnes
     oreTonnes += summary.oreTonnes
     wasteTonnes += summary.wasteTonnes
+    const pushbacks =
+      summary.firstPushback === summary.lastPushback
+        ? String(summary.firstPushback)
+        : `${summary.firstPushback}–${summary.lastPushback}`
     const tr = row(
-      [
+      columns([
         String(summary.period),
+        pushbacks,
         megatonnes(summary.tonnes),
         megatonnes(summary.oreTonnes),
         megatonnes(summary.wasteTonnes),
@@ -57,7 +65,7 @@ export function renderScheduleTable(
         millions(summary.cashFlow),
         millions(summary.discounted),
         millions(cumulative),
-      ],
+      ]),
       'td',
     )
     if (summary.period === currentPeriod) tr.className = 'current'
@@ -68,8 +76,9 @@ export function renderScheduleTable(
   const foot = document.createElement('tfoot')
   foot.append(
     row(
-      [
+      columns([
         'Total',
+        '',
         megatonnes(tonnes),
         megatonnes(oreTonnes),
         megatonnes(wasteTonnes),
@@ -78,7 +87,7 @@ export function renderScheduleTable(
         millions(schedule.undiscounted),
         millions(schedule.npv),
         '',
-      ],
+      ]),
       'td',
     ),
   )

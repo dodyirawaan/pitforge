@@ -20,8 +20,16 @@ function choosePattern(model: BlockModel, slopeAngle: number, levels: number) {
  * Finds the ultimate pit: the set of blocks with the highest total value that
  * respects the wall slope. Solved exactly as a maximum closure problem, where
  * the minimum cut separates the blocks worth mining from the rest.
+ *
+ * `within` limits the search to a pit already known to contain the answer,
+ * such as the ultimate pit at a higher price.
  */
-export function optimisePit(model: BlockModel, values: Float64Array, slopeAngle: number): Uint8Array {
+export function optimisePit(
+  model: BlockModel,
+  values: Float64Array,
+  slopeAngle: number,
+  within?: Uint8Array,
+): Uint8Array {
   const { count, positions, size } = model
   const min = [Infinity, Infinity, Infinity]
   const max = [-Infinity, -Infinity, -Infinity]
@@ -65,7 +73,7 @@ export function optimisePit(model: BlockModel, values: Float64Array, slopeAngle:
   let candidates = 0
   for (const i of blockAt) {
     if (i < 0) continue
-    if (values[i] > 0) candidate[i] = 1
+    if (values[i] > 0 && (!within || within[i])) candidate[i] = 1
     if (!candidate[i]) continue
     candidates++
     forEachAbove(i, (above) => {
