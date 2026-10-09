@@ -59,7 +59,23 @@
       </section>
 
       <section>
+        <h2>Pit optimisation</h2>
+        <div id="economic-controls"></div>
+        <p id="break-even" class="note"></p>
+        <button id="optimise-button" type="button">Run optimisation</button>
+        <p id="optimise-status" class="note" role="status"></p>
+        <dl id="optimise-results"></dl>
+      </section>
+
+      <section>
         <h2>Pit reserves</h2>
+        <label class="field">
+          <span class="field-head"><span>Pit</span></span>
+          <select id="pit-source">
+            <option value="design">Manual design</option>
+            <option value="optimised">Optimised shell</option>
+          </select>
+        </label>
         <div id="reserve-controls"></div>
         <dl id="reserves"></dl>
       </section>

@@ -5,6 +5,9 @@ import type { PitParams } from './design/PitDesign.ts'
 import { computeReserves } from './design/reserves.ts'
 import type { BlockModel } from './model/BlockModel.ts'
 import { parseBlockModelCsv } from './model/csv.ts'
+import { blockValues, breakEvenGrade, summarisePit } from './optimise/economics.ts'
+import type { EconomicParams, PitEconomics } from './optimise/economics.ts'
+import { runOptimiser } from './optimise/runOptimiser.ts'
 import { createSampleModel } from './model/sample.ts'
 import { buildTopography } from './model/topography.ts'
 import type { Topography } from './model/topography.ts'
@@ -16,6 +19,13 @@ import { buildPitOutline, disposePitOutline } from './viewer/pitOutline.ts'
 import { Viewer } from './viewer/Viewer.ts'
 
 type BlockMode = 'remaining' | 'mined' | 'all'
+type PitSource = 'design' | 'optimised'
+
+interface OptimisedShell {
+  mined: Uint8Array
+  /** Tonnage and value under the inputs the shell was optimised with. */
+  economics: PitEconomics
+}
 
 type NumericPitParam = {
   [K in keyof PitParams]: PitParams[K] extends number ? K : never
@@ -26,6 +36,7 @@ interface Session {
   view: BlockModelView
   topography: Topography
   pit: PitParams
+  shell: OptimisedShell | null
 }
 
 function element<T extends HTMLElement>(id: string): T {
@@ -50,6 +61,12 @@ const rampEnabled = element<HTMLInputElement>('ramp-enabled')
 const rampControls = element('ramp-controls')
 const rampClockwise = element<HTMLInputElement>('ramp-clockwise')
 const pitSlope = element('pit-slope')
+const economicControls = element('economic-controls')
+const breakEven = element('break-even')
+const optimiseButton = element<HTMLButtonElement>('optimise-button')
+const optimiseStatus = element('optimise-status')
+const optimiseResults = element('optimise-results')
+const pitSource = element<HTMLSelectElement>('pit-source')
 const reserveControls = element('reserve-controls')
 const reserves = element('reserves')
 
@@ -60,6 +77,8 @@ const integer = new Intl.NumberFormat('en-US')
 let session: Session | null = null
 let outline: THREE.LineSegments | null = null
 let density = 2.7
+const economics: EconomicParams = { price: 60, recovery: 90, processingCost: 20, miningCost: 3 }
+let slopeAngle = 45
 
 function formatGrade(value: number): string {
   return value.toFixed(2)
@@ -68,6 +87,19 @@ function formatGrade(value: number): string {
 function formatTonnes(tonnes: number): string {
   if (tonnes >= 1e6) return `${(tonnes / 1e6).toFixed(2)} Mt`
   return `${(tonnes / 1e3).toFixed(1)} kt`
+}
+
+function formatMoney(value: number): string {
+  return `$${(value / 1e6).toFixed(1)} M`
+}
+
+function formatRatio(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : '–'
+}
+
+function setOptimiseStatus(message: string, isError = false): void {
+  optimiseStatus.textContent = message
+  optimiseStatus.classList.toggle('error', isError)
 }
 
 function setStatus(message: string, isError = false): void {
@@ -90,14 +122,16 @@ function refresh(): void {
   session.pit.rampEnabled = rampEnabled.checked
   session.pit.rampClockwise = rampClockwise.checked
   const pit = pitEnabled.checked ? new PitDesign(session.pit) : null
-  const mined = pit ? computeMined(model, pit) : null
+  const designMined = pit ? computeMined(model, pit) : null
+  const source = pitSource.value as PitSource
+  const mined = source === 'optimised' ? (session.shell?.mined ?? null) : designMined
 
   const shown = view.setVisible((i) => {
     if (model.grades[i] < cutoffGrade) return false
     if (!mined || mode === 'all') return true
     return mode === 'mined' ? mined[i] === 1 : mined[i] === 0
   })
-  setOutline(pit ? buildPitOutline(pit, topography) : null)
+  setOutline(pit && source === 'design' ? buildPitOutline(pit, topography) : null)
 
   cutoffValue.textContent = `≥ ${formatGrade(cutoffGrade)}`
   const [dx, dy, dz] = model.size
@@ -108,22 +142,96 @@ function refresh(): void {
     ['Grade range', `${formatGrade(model.gradeMin)} – ${formatGrade(model.gradeMax)}`],
   ])
 
-  if (pit && mined) {
-    const result = computeReserves(model, mined, cutoffGrade, density)
+  if (pit) {
     const overall = pit.overallAngle(topography.top).toFixed(1)
     pitSlope.textContent = `Inter-ramp angle ${pit.interRampAngle.toFixed(1)}° · overall ${overall}°`
+  } else {
+    pitSlope.textContent = ''
+  }
+
+  if (mined) {
+    const result = computeReserves(model, mined, cutoffGrade, density)
     renderRows(reserves, [
       ['Total', formatTonnes(result.totalTonnes)],
       ['Ore', formatTonnes(result.oreTonnes)],
       ['Waste', formatTonnes(result.wasteTonnes)],
-      ['Strip ratio', Number.isFinite(result.stripRatio) ? result.stripRatio.toFixed(2) : '–'],
+      ['Strip ratio', formatRatio(result.stripRatio)],
       ['Ore grade', Number.isNaN(result.oreGrade) ? '–' : formatGrade(result.oreGrade)],
     ])
   } else {
-    pitSlope.textContent = ''
     renderRows(reserves, [])
   }
+
+  const cutoffText = Number.isFinite(breakEvenGrade(economics)) ? formatGrade(breakEvenGrade(economics)) : '–'
+  breakEven.textContent = `Break-even cutoff grade ${cutoffText}`
+  const rows: [string, string][] = []
+  if (session.shell) {
+    const shell = session.shell.economics
+    rows.push(
+      ['Shell value', formatMoney(shell.value)],
+      ['Shell total', formatTonnes(shell.totalTonnes)],
+      ['Shell ore', formatTonnes(shell.oreTonnes)],
+      ['Shell waste', formatTonnes(shell.wasteTonnes)],
+      ['Shell strip ratio', formatRatio(shell.stripRatio)],
+    )
+  }
+  if (designMined) {
+    rows.push(['Design value', formatMoney(summarisePit(model, designMined, density, economics).value)])
+  }
+  renderRows(optimiseResults, rows)
   viewer.requestRender()
+}
+
+/** Called when an input of the optimisation changes, so an existing shell is out of date. */
+function economicsChanged(): void {
+  if (session?.shell) setOptimiseStatus('Inputs changed since the last run. Run again to update the shell.')
+  refresh()
+}
+
+async function optimise(): Promise<void> {
+  if (!session) return
+  const current = session
+  const inputs = { ...economics }
+  const inputDensity = density
+  optimiseButton.disabled = true
+  setOptimiseStatus('Optimising…')
+  const started = performance.now()
+  try {
+    const values = blockValues(current.model, inputDensity, inputs)
+    const mined = await runOptimiser(current.model, values, slopeAngle)
+    // A different model may have been loaded while the optimiser was running.
+    if (session !== current) return
+    current.shell = { mined, economics: summarisePit(current.model, mined, inputDensity, inputs) }
+    pitSource.value = 'optimised'
+    setOptimiseStatus(`Optimised in ${((performance.now() - started) / 1000).toFixed(1)} s.`)
+    refresh()
+  } catch (error) {
+    if (session === current) setOptimiseStatus(error instanceof Error ? error.message : String(error), true)
+  } finally {
+    optimiseButton.disabled = false
+  }
+}
+
+function buildEconomicControls(): void {
+  const dollars = (value: number) => `$${value}`
+  const slider = (key: keyof EconomicParams, options: Omit<SliderOptions, 'value'>) => {
+    economics[key] = addSlider(economicControls, { ...options, value: economics[key] }, (value) => {
+      economics[key] = value
+      economicsChanged()
+    })
+  }
+  slider('price', { label: 'Price per grade unit', min: 0, max: 200, step: 0.5, format: dollars })
+  slider('recovery', { label: 'Recovery', min: 0, max: 100, step: 1, format: (value) => `${value}%` })
+  slider('processingCost', { label: 'Processing cost per t ore', min: 0, max: 100, step: 0.5, format: dollars })
+  slider('miningCost', { label: 'Mining cost per t', min: 0, max: 20, step: 0.1, format: dollars })
+  slopeAngle = addSlider(
+    economicControls,
+    { label: 'Overall slope angle', min: 25, max: 70, step: 1, value: slopeAngle, format: (value) => `${value}°` },
+    (value) => {
+      slopeAngle = value
+      economicsChanged()
+    },
+  )
 }
 
 function buildPitControls(current: Session, bounds: THREE.Box3): void {
@@ -183,7 +291,7 @@ function buildPitControls(current: Session, bounds: THREE.Box3): void {
     { label: 'Density', min: 1.5, max: 4.5, step: 0.05, value: density, format: (value) => `${value.toFixed(2)} t/m³` },
     (value) => {
       density = value
-      refresh()
+      economicsChanged()
     },
   )
 }
@@ -192,7 +300,15 @@ function show(model: BlockModel, message: string): void {
   session?.view.dispose()
   const view = new BlockModelView(model)
   const bounds = view.bounds()
-  session = { model, view, topography: buildTopography(model), pit: defaultPitParams(model, bounds) }
+  session = {
+    model,
+    view,
+    topography: buildTopography(model),
+    pit: defaultPitParams(model, bounds),
+    shell: null,
+  }
+  pitSource.value = 'design'
+  setOptimiseStatus('Not run yet.')
   viewer.setContent(view.mesh, bounds)
 
   legendTitle.textContent = model.gradeName
@@ -211,6 +327,8 @@ function show(model: BlockModel, message: string): void {
 
 cutoff.addEventListener('input', refresh)
 pitEnabled.addEventListener('change', refresh)
+pitSource.addEventListener('change', refresh)
+optimiseButton.addEventListener('click', optimise)
 rampEnabled.addEventListener('change', refresh)
 rampClockwise.addEventListener('change', refresh)
 blockMode.addEventListener('change', refresh)
@@ -230,4 +348,5 @@ fileInput.addEventListener('change', async () => {
   }
 })
 
+buildEconomicControls()
 show(createSampleModel(), 'Sample model loaded.')

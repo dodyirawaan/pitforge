@@ -27,8 +27,13 @@ Early development. The frontend can:
   direction); the wall is pushed out to make room for the road, and the extra
   stripping is included in the reported tonnage
 
+- optimise the ultimate pit from a price, recovery, processing cost, mining
+  cost and overall slope angle, and compare its value with the manual design
+
 The ramp is a single continuous spiral without switchbacks, and tonnage uses a
-single density for all blocks.
+single density for all blocks. The optimiser runs in the browser, which limits
+it to small and medium block models; it gives an undiscounted ultimate pit with
+one slope angle and no pushbacks yet.
 
 ## Running the frontend
 
