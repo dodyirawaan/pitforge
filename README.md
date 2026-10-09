@@ -23,9 +23,12 @@ Early development. The frontend can:
   size, bench height, berm width, face angle), show the excavated model with
   bench toe and crest lines, and report tonnage, strip ratio and ore grade
   inside the pit
+- add a spiral haul ramp to the pit (width, gradient, start bearing and
+  direction); the wall is pushed out to make room for the road, and the extra
+  stripping is included in the reported tonnage
 
-Pit designs have no ramps yet, and tonnage uses a single density for all
-blocks.
+The ramp is a single continuous spiral without switchbacks, and tonnage uses a
+single density for all blocks.
 
 ## Running the frontend
 

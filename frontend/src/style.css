@@ -133,6 +133,11 @@ button:hover {
   gap: 8px;
 }
 
+.field + .check,
+div + .check {
+  margin-top: 14px;
+}
+
 .check input {
   accent-color: var(--accent);
 }

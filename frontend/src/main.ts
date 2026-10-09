@@ -17,6 +17,10 @@ import { Viewer } from './viewer/Viewer.ts'
 
 type BlockMode = 'remaining' | 'mined' | 'all'
 
+type NumericPitParam = {
+  [K in keyof PitParams]: PitParams[K] extends number ? K : never
+}[keyof PitParams]
+
 interface Session {
   model: BlockModel
   view: BlockModelView
@@ -42,6 +46,9 @@ const stats = element('stats')
 const pitEnabled = element<HTMLInputElement>('pit-enabled')
 const blockMode = element<HTMLSelectElement>('block-mode')
 const pitControls = element('pit-controls')
+const rampEnabled = element<HTMLInputElement>('ramp-enabled')
+const rampControls = element('ramp-controls')
+const rampClockwise = element<HTMLInputElement>('ramp-clockwise')
 const pitSlope = element('pit-slope')
 const reserveControls = element('reserve-controls')
 const reserves = element('reserves')
@@ -80,6 +87,8 @@ function refresh(): void {
   const { model, view, topography } = session
   const cutoffGrade = Number(cutoff.value)
   const mode = blockMode.value as BlockMode
+  session.pit.rampEnabled = rampEnabled.checked
+  session.pit.rampClockwise = rampClockwise.checked
   const pit = pitEnabled.checked ? new PitDesign(session.pit) : null
   const mined = pit ? computeMined(model, pit) : null
 
@@ -101,7 +110,8 @@ function refresh(): void {
 
   if (pit && mined) {
     const result = computeReserves(model, mined, cutoffGrade, density)
-    pitSlope.textContent = `Overall wall angle ${pit.overallAngle.toFixed(1)}°`
+    const overall = pit.overallAngle(topography.top).toFixed(1)
+    pitSlope.textContent = `Inter-ramp angle ${pit.interRampAngle.toFixed(1)}° · overall ${overall}°`
     renderRows(reserves, [
       ['Total', formatTonnes(result.totalTonnes)],
       ['Ore', formatTonnes(result.oreTonnes)],
@@ -121,8 +131,10 @@ function buildPitControls(current: Session, bounds: THREE.Box3): void {
   const [dx, dy, dz] = model.size
   const [originX, originY, originZ] = model.origin
   const metres = (value: number) => `${value} m`
-  const slider = (key: keyof PitParams, options: Omit<SliderOptions, 'value'>) => {
-    pit[key] = addSlider(pitControls, { ...options, value: pit[key] }, (value) => {
+  const degrees = (value: number) => `${value}°`
+  let parent = pitControls
+  const slider = (key: NumericPitParam, options: Omit<SliderOptions, 'value'>) => {
+    pit[key] = addSlider(parent, { ...options, value: pit[key] }, (value) => {
       pit[key] = value
       refresh()
     })
@@ -154,10 +166,16 @@ function buildPitControls(current: Session, bounds: THREE.Box3): void {
   const floorStep = Math.min(dx, dy)
   slider('floorLength', { label: 'Floor length', min: floorStep, max: span, step: floorStep, format: metres })
   slider('floorWidth', { label: 'Floor width', min: floorStep, max: span, step: floorStep, format: metres })
-  slider('azimuth', { label: 'Floor azimuth', min: 0, max: 175, step: 5, format: (value) => `${value}°` })
+  slider('azimuth', { label: 'Floor azimuth', min: 0, max: 175, step: 5, format: degrees })
   slider('benchHeight', { label: 'Bench height', min: dz, max: dz * 4, step: dz, format: metres })
   slider('bermWidth', { label: 'Berm width', min: 0, max: 20, step: 0.5, format: metres })
-  slider('faceAngle', { label: 'Face angle', min: 30, max: 85, step: 1, format: (value) => `${value}°` })
+  slider('faceAngle', { label: 'Face angle', min: 30, max: 85, step: 1, format: degrees })
+
+  rampControls.replaceChildren()
+  parent = rampControls
+  slider('rampWidth', { label: 'Ramp width', min: 5, max: 40, step: 1, format: metres })
+  slider('rampGradient', { label: 'Ramp gradient', min: 5, max: 15, step: 0.5, format: (value) => `${value}%` })
+  slider('rampStart', { label: 'Ramp start bearing', min: 0, max: 355, step: 5, format: degrees })
 
   reserveControls.replaceChildren()
   density = addSlider(
@@ -193,6 +211,8 @@ function show(model: BlockModel, message: string): void {
 
 cutoff.addEventListener('input', refresh)
 pitEnabled.addEventListener('change', refresh)
+rampEnabled.addEventListener('change', refresh)
+rampClockwise.addEventListener('change', refresh)
 blockMode.addEventListener('change', refresh)
 
 sampleButton.addEventListener('click', () => show(createSampleModel(), 'Sample model loaded.'))
