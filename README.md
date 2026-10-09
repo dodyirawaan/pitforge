@@ -30,8 +30,13 @@ Early development. The frontend can:
 - optimise the ultimate pit from a price, recovery, processing cost, mining
   cost and overall slope angle, and compare its value with the manual design
 
+- schedule the pit into periods at a set mining rate, with a table of
+  tonnage, grade, cash flow and NPV per period and a 3D playback of the pit
+  being mined
+
 The ramp is a single continuous spiral without switchbacks, and tonnage uses a
-single density for all blocks. The optimiser runs in the browser, which limits
+single density for all blocks. The schedule mines bench by bench from the top
+down; it is not optimised for value and has no pushbacks or processing limit. The optimiser runs in the browser, which limits
 it to small and medium block models; it gives an undiscounted ultimate pit with
 one slope angle and no pushbacks yet.
 

@@ -18,8 +18,15 @@ export class BlockModelView {
     this.setVisible(() => true)
   }
 
-  /** Shows only the blocks whose index passes `isVisible`. Returns the number shown. */
-  setVisible(isVisible: (index: number) => boolean): number {
+  /**
+   * Shows only the blocks whose index passes `isVisible`. Blocks are coloured
+   * by grade unless `colourOf` gives sRGB components for a block. Returns the
+   * number shown.
+   */
+  setVisible(
+    isVisible: (index: number) => boolean,
+    colourOf?: (index: number) => [number, number, number],
+  ): number {
     const { count, positions, grades, gradeMin, gradeMax } = this.model
     const range = gradeMax - gradeMin
     const matrix = new THREE.Matrix4()
@@ -31,7 +38,7 @@ export class BlockModelView {
       matrix.makeTranslation(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2])
       this.mesh.setMatrixAt(shown, matrix)
       const t = range > 0 ? (grades[i] - gradeMin) / range : 0
-      color.setRGB(...gradeColor(t), THREE.SRGBColorSpace)
+      color.setRGB(...(colourOf ? colourOf(i) : gradeColor(t)), THREE.SRGBColorSpace)
       this.mesh.setColorAt(shown, color)
       shown++
     }

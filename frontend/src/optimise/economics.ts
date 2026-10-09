@@ -22,7 +22,7 @@ export interface PitEconomics {
 }
 
 /** Processing margin per tonne of a block at the given grade. */
-function margin(grade: number, params: EconomicParams): number {
+export function processingMargin(grade: number, params: EconomicParams): number {
   return (grade * params.price * params.recovery) / 100 - params.processingCost
 }
 
@@ -37,7 +37,7 @@ export function blockValues(model: BlockModel, density: number, params: Economic
   const tonnes = model.size[0] * model.size[1] * model.size[2] * density
   const values = new Float64Array(model.count)
   for (let i = 0; i < model.count; i++) {
-    values[i] = tonnes * (Math.max(margin(model.grades[i], params), 0) - params.miningCost)
+    values[i] = tonnes * (Math.max(processingMargin(model.grades[i], params), 0) - params.miningCost)
   }
   return values
 }
@@ -56,7 +56,7 @@ export function summarisePit(
   for (let i = 0; i < model.count; i++) {
     if (!mined[i]) continue
     blocks++
-    const blockMargin = margin(model.grades[i], params)
+    const blockMargin = processingMargin(model.grades[i], params)
     if (blockMargin > 0) oreBlocks++
     value += tonnes * (Math.max(blockMargin, 0) - params.miningCost)
   }

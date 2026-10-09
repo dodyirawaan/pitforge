@@ -8,13 +8,15 @@ import { parseBlockModelCsv } from './model/csv.ts'
 import { blockValues, breakEvenGrade, summarisePit } from './optimise/economics.ts'
 import type { EconomicParams, PitEconomics } from './optimise/economics.ts'
 import { runOptimiser } from './optimise/runOptimiser.ts'
+import { buildSchedule } from './schedule/schedule.ts'
+import { renderScheduleTable } from './ui/scheduleTable.ts'
 import { createSampleModel } from './model/sample.ts'
 import { buildTopography } from './model/topography.ts'
 import type { Topography } from './model/topography.ts'
 import { addSlider, renderRows } from './ui/controls.ts'
 import type { SliderOptions } from './ui/controls.ts'
 import { BlockModelView } from './viewer/BlockModelView.ts'
-import { LEGEND_GRADIENT } from './viewer/colormap.ts'
+import { LEGEND_GRADIENT, gradeColor } from './viewer/colormap.ts'
 import { buildPitOutline, disposePitOutline } from './viewer/pitOutline.ts'
 import { Viewer } from './viewer/Viewer.ts'
 
@@ -67,6 +69,15 @@ const optimiseButton = element<HTMLButtonElement>('optimise-button')
 const optimiseStatus = element('optimise-status')
 const optimiseResults = element('optimise-results')
 const pitSource = element<HTMLSelectElement>('pit-source')
+const scheduleEnabled = element<HTMLInputElement>('schedule-enabled')
+const scheduleControls = element('schedule-controls')
+const colourByPeriod = element<HTMLInputElement>('colour-by-period')
+const scheduleSummary = element('schedule-summary')
+const schedulePanel = element('schedule-panel')
+const playButton = element<HTMLButtonElement>('play-button')
+const periodSlider = element<HTMLInputElement>('period-slider')
+const periodLabel = element('period-label')
+const scheduleTable = element<HTMLTableElement>('schedule-table')
 const reserveControls = element('reserve-controls')
 const reserves = element('reserves')
 
@@ -79,6 +90,15 @@ let outline: THREE.LineSegments | null = null
 let density = 2.7
 const economics: EconomicParams = { price: 60, recovery: 90, processingCost: 20, miningCost: 3 }
 let slopeAngle = 45
+/** Tonnes mined per period. Set from the model size when a model is loaded. */
+let miningRate = 0
+let discountRate = 10
+/** Period shown by the playback, or null to follow the end of the schedule. */
+let playPeriod: number | null = null
+let periodCount = 0
+let playTimer: number | undefined
+const UNSCHEDULED_COLOUR: [number, number, number] = [0.33, 0.36, 0.42]
+const PLAYBACK_INTERVAL = 700
 
 function formatGrade(value: number): string {
   return value.toFixed(2)
@@ -126,11 +146,48 @@ function refresh(): void {
   const source = pitSource.value as PitSource
   const mined = source === 'optimised' ? (session.shell?.mined ?? null) : designMined
 
+  const schedule =
+    scheduleEnabled.checked && mined
+      ? buildSchedule(model, mined, density, economics, miningRate, discountRate)
+      : null
+  periodCount = schedule ? schedule.periods.length : 0
+  const shownPeriod = Math.min(playPeriod ?? periodCount, periodCount)
+  // With a schedule, only the blocks mined up to the period shown count as mined.
+  const isMined = schedule
+    ? (i: number) => schedule.periodOf[i] > 0 && schedule.periodOf[i] <= shownPeriod
+    : (i: number) => mined !== null && mined[i] === 1
+  const periodColours = schedule !== null && colourByPeriod.checked
+  const colourOf = periodColours
+    ? (i: number) =>
+        schedule.periodOf[i] > 0
+          ? gradeColor(periodCount > 1 ? (schedule.periodOf[i] - 1) / (periodCount - 1) : 0)
+          : UNSCHEDULED_COLOUR
+    : undefined
+
   const shown = view.setVisible((i) => {
     if (model.grades[i] < cutoffGrade) return false
     if (!mined || mode === 'all') return true
-    return mode === 'mined' ? mined[i] === 1 : mined[i] === 0
-  })
+    return (mode === 'mined') === isMined(i)
+  }, colourOf)
+
+  legendTitle.textContent = periodColours ? 'Period mined' : model.gradeName
+  legendMin.textContent = periodColours ? '1' : formatGrade(model.gradeMin)
+  legendMax.textContent = periodColours ? String(periodCount) : formatGrade(model.gradeMax)
+
+  schedulePanel.hidden = schedule === null
+  if (schedule) {
+    periodSlider.max = String(periodCount)
+    periodSlider.value = String(shownPeriod)
+    periodLabel.textContent = shownPeriod === 0 ? 'Before mining' : `Period ${shownPeriod} of ${periodCount}`
+    renderScheduleTable(scheduleTable, schedule, shownPeriod, showPeriod)
+    scheduleSummary.textContent =
+      `${periodCount} periods · NPV ${formatMoney(schedule.npv)} · ` +
+      `undiscounted ${formatMoney(schedule.undiscounted)}`
+  } else {
+    stopPlayback()
+    scheduleSummary.textContent =
+      scheduleEnabled.checked ? 'There is no pit to schedule. Enable the pit or run the optimisation.' : ''
+  }
   setOutline(pit && source === 'design' ? buildPitOutline(pit, topography) : null)
 
   cutoffValue.textContent = `≥ ${formatGrade(cutoffGrade)}`
@@ -180,6 +237,40 @@ function refresh(): void {
   }
   renderRows(optimiseResults, rows)
   viewer.requestRender()
+}
+
+function stopPlayback(): void {
+  window.clearInterval(playTimer)
+  playTimer = undefined
+  playButton.textContent = 'Play'
+}
+
+/** Jumps the playback to the end of a period; 0 shows the ground before mining. */
+function showPeriod(period: number): void {
+  stopPlayback()
+  playPeriod = period >= periodCount ? null : period
+  refresh()
+}
+
+function togglePlayback(): void {
+  if (playTimer !== undefined) {
+    stopPlayback()
+    return
+  }
+  // Start over when the playback is already at the end.
+  playPeriod = playPeriod === null ? 0 : playPeriod
+  playButton.textContent = 'Pause'
+  refresh()
+  playTimer = window.setInterval(() => {
+    const next = (playPeriod ?? periodCount) + 1
+    if (next >= periodCount) {
+      playPeriod = null
+      stopPlayback()
+    } else {
+      playPeriod = next
+    }
+    refresh()
+  }, PLAYBACK_INTERVAL)
 }
 
 /** Called when an input of the optimisation changes, so an existing shell is out of date. */
@@ -285,6 +376,32 @@ function buildPitControls(current: Session, bounds: THREE.Box3): void {
   slider('rampGradient', { label: 'Ramp gradient', min: 5, max: 15, step: 0.5, format: (value) => `${value}%` })
   slider('rampStart', { label: 'Ramp start bearing', min: 0, max: 355, step: 5, format: degrees })
 
+  scheduleControls.replaceChildren()
+  const modelTonnes = model.count * dx * dy * dz * density
+  miningRate = addSlider(
+    scheduleControls,
+    {
+      label: 'Mining rate per period',
+      min: modelTonnes / 200,
+      max: modelTonnes / 2,
+      step: modelTonnes / 200,
+      value: modelTonnes / 40,
+      format: formatTonnes,
+    },
+    (value) => {
+      miningRate = value
+      refresh()
+    },
+  )
+  discountRate = addSlider(
+    scheduleControls,
+    { label: 'Discount rate per period', min: 0, max: 25, step: 0.5, value: discountRate, format: (value) => `${value}%` },
+    (value) => {
+      discountRate = value
+      refresh()
+    },
+  )
+
   reserveControls.replaceChildren()
   density = addSlider(
     reserveControls,
@@ -310,10 +427,8 @@ function show(model: BlockModel, message: string): void {
   pitSource.value = 'design'
   setOptimiseStatus('Not run yet.')
   viewer.setContent(view.mesh, bounds)
-
-  legendTitle.textContent = model.gradeName
-  legendMin.textContent = formatGrade(model.gradeMin)
-  legendMax.textContent = formatGrade(model.gradeMax)
+  stopPlayback()
+  playPeriod = null
 
   cutoff.min = String(model.gradeMin)
   cutoff.max = String(model.gradeMax)
@@ -328,6 +443,10 @@ function show(model: BlockModel, message: string): void {
 cutoff.addEventListener('input', refresh)
 pitEnabled.addEventListener('change', refresh)
 pitSource.addEventListener('change', refresh)
+scheduleEnabled.addEventListener('change', refresh)
+colourByPeriod.addEventListener('change', refresh)
+playButton.addEventListener('click', togglePlayback)
+periodSlider.addEventListener('input', () => showPeriod(Number(periodSlider.value)))
 optimiseButton.addEventListener('click', optimise)
 rampEnabled.addEventListener('change', refresh)
 rampClockwise.addEventListener('change', refresh)

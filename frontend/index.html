@@ -68,6 +68,14 @@
       </section>
 
       <section>
+        <h2>Scheduling</h2>
+        <label class="check"><input id="schedule-enabled" type="checkbox" /> Schedule the pit</label>
+        <div id="schedule-controls"></div>
+        <label class="check"><input id="colour-by-period" type="checkbox" /> Colour blocks by period</label>
+        <p id="schedule-summary" class="note"></p>
+      </section>
+
+      <section>
         <h2>Pit reserves</h2>
         <label class="field">
           <span class="field-head"><span>Pit</span></span>
@@ -82,7 +90,19 @@
 
       <p class="hint">Drag to orbit · right-drag to pan · scroll to zoom</p>
     </aside>
-    <main id="viewport"></main>
+    <div id="workspace">
+      <main id="viewport"></main>
+      <div id="schedule-panel" hidden>
+        <div id="playback">
+          <button id="play-button" type="button">Play</button>
+          <input id="period-slider" type="range" min="0" step="1" aria-label="Period shown" />
+          <span id="period-label"></span>
+        </div>
+        <div id="schedule-scroll">
+          <table id="schedule-table"></table>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
