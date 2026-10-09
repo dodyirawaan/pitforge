@@ -12,6 +12,7 @@ export class Viewer {
   private readonly camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000)
   private readonly controls: OrbitControls
   private content: THREE.Object3D | null = null
+  private overlay: THREE.Object3D | null = null
   private renderQueued = false
 
   constructor(container: HTMLElement) {
@@ -40,6 +41,14 @@ export class Viewer {
     this.content = object
     this.scene.add(object)
     this.frame(bounds)
+  }
+
+  /** Replaces the object drawn on top of the content, without moving the camera. */
+  setOverlay(object: THREE.Object3D | null): void {
+    if (this.overlay) this.scene.remove(this.overlay)
+    this.overlay = object
+    if (object) this.scene.add(object)
+    this.requestRender()
   }
 
   requestRender(): void {

@@ -15,8 +15,17 @@ extraction sequences in an interactive 3D environment.
 
 ## Status
 
-Early development. The frontend can load a block model and display it in 3D,
-coloured by grade, with a cutoff-grade filter.
+Early development. The frontend can:
+
+- load a block model and display it in 3D, coloured by grade, with a
+  cutoff-grade filter
+- design a benched pit from an elliptical floor (position, floor elevation and
+  size, bench height, berm width, face angle), show the excavated model with
+  bench toe and crest lines, and report tonnage, strip ratio and ore grade
+  inside the pit
+
+Pit designs have no ramps yet, and tonnage uses a single density for all
+blocks.
 
 ## Running the frontend
 

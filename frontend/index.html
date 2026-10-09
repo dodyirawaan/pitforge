@@ -40,6 +40,27 @@
         <dl id="stats"></dl>
       </section>
 
+      <section>
+        <h2>Pit design</h2>
+        <label class="check"><input id="pit-enabled" type="checkbox" checked /> Enable pit</label>
+        <label class="field">
+          <span class="field-head"><span>Show blocks</span></span>
+          <select id="block-mode">
+            <option value="remaining">Remaining after mining</option>
+            <option value="mined">Inside pit</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <div id="pit-controls"></div>
+        <p id="pit-slope"></p>
+      </section>
+
+      <section>
+        <h2>Pit reserves</h2>
+        <div id="reserve-controls"></div>
+        <dl id="reserves"></dl>
+      </section>
+
       <p class="hint">Drag to orbit · right-drag to pan · scroll to zoom</p>
     </aside>
     <main id="viewport"></main>

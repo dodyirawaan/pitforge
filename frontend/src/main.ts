@@ -1,10 +1,28 @@
 import './style.css'
+import type * as THREE from 'three'
+import { PitDesign, computeMined, defaultPitParams } from './design/PitDesign.ts'
+import type { PitParams } from './design/PitDesign.ts'
+import { computeReserves } from './design/reserves.ts'
 import type { BlockModel } from './model/BlockModel.ts'
 import { parseBlockModelCsv } from './model/csv.ts'
 import { createSampleModel } from './model/sample.ts'
+import { buildTopography } from './model/topography.ts'
+import type { Topography } from './model/topography.ts'
+import { addSlider, renderRows } from './ui/controls.ts'
+import type { SliderOptions } from './ui/controls.ts'
 import { BlockModelView } from './viewer/BlockModelView.ts'
 import { LEGEND_GRADIENT } from './viewer/colormap.ts'
+import { buildPitOutline, disposePitOutline } from './viewer/pitOutline.ts'
 import { Viewer } from './viewer/Viewer.ts'
+
+type BlockMode = 'remaining' | 'mined' | 'all'
+
+interface Session {
+  model: BlockModel
+  view: BlockModelView
+  topography: Topography
+  pit: PitParams
+}
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id)
@@ -21,16 +39,28 @@ const legendTitle = element('legend-title')
 const legendMin = element('legend-min')
 const legendMax = element('legend-max')
 const stats = element('stats')
+const pitEnabled = element<HTMLInputElement>('pit-enabled')
+const blockMode = element<HTMLSelectElement>('block-mode')
+const pitControls = element('pit-controls')
+const pitSlope = element('pit-slope')
+const reserveControls = element('reserve-controls')
+const reserves = element('reserves')
 
 element('legend-bar').style.background = LEGEND_GRADIENT
 
 const viewer = new Viewer(element('viewport'))
 const integer = new Intl.NumberFormat('en-US')
-let model: BlockModel | null = null
-let view: BlockModelView | null = null
+let session: Session | null = null
+let outline: THREE.LineSegments | null = null
+let density = 2.7
 
 function formatGrade(value: number): string {
   return value.toFixed(2)
+}
+
+function formatTonnes(tonnes: number): string {
+  if (tonnes >= 1e6) return `${(tonnes / 1e6).toFixed(2)} Mt`
+  return `${(tonnes / 1e3).toFixed(1)} kt`
 }
 
 function setStatus(message: string, isError = false): void {
@@ -38,54 +68,132 @@ function setStatus(message: string, isError = false): void {
   status.classList.toggle('error', isError)
 }
 
-function renderStats(shown: number): void {
-  if (!model) return
+function setOutline(next: THREE.LineSegments | null): void {
+  viewer.setOverlay(next)
+  if (outline) disposePitOutline(outline)
+  outline = next
+}
+
+/** Recomputes the pit, the visible blocks and every readout from the current inputs. */
+function refresh(): void {
+  if (!session) return
+  const { model, view, topography } = session
+  const cutoffGrade = Number(cutoff.value)
+  const mode = blockMode.value as BlockMode
+  const pit = pitEnabled.checked ? new PitDesign(session.pit) : null
+  const mined = pit ? computeMined(model, pit) : null
+
+  const shown = view.setVisible((i) => {
+    if (model.grades[i] < cutoffGrade) return false
+    if (!mined || mode === 'all') return true
+    return mode === 'mined' ? mined[i] === 1 : mined[i] === 0
+  })
+  setOutline(pit ? buildPitOutline(pit, topography) : null)
+
+  cutoffValue.textContent = `≥ ${formatGrade(cutoffGrade)}`
   const [dx, dy, dz] = model.size
-  const rows: [string, string][] = [
+  renderRows(stats, [
     ['Blocks', integer.format(model.count)],
     ['Shown', integer.format(shown)],
     ['Block size', `${dx} × ${dy} × ${dz}`],
     ['Grade range', `${formatGrade(model.gradeMin)} – ${formatGrade(model.gradeMax)}`],
-  ]
-  stats.replaceChildren(
-    ...rows.flatMap(([label, value]) => {
-      const dt = document.createElement('dt')
-      dt.textContent = label
-      const dd = document.createElement('dd')
-      dd.textContent = value
-      return [dt, dd]
-    }),
-  )
-}
+  ])
 
-function applyCutoff(): void {
-  if (!view) return
-  const value = Number(cutoff.value)
-  const shown = view.setCutoff(value)
-  cutoffValue.textContent = `≥ ${formatGrade(value)}`
-  renderStats(shown)
+  if (pit && mined) {
+    const result = computeReserves(model, mined, cutoffGrade, density)
+    pitSlope.textContent = `Overall wall angle ${pit.overallAngle.toFixed(1)}°`
+    renderRows(reserves, [
+      ['Total', formatTonnes(result.totalTonnes)],
+      ['Ore', formatTonnes(result.oreTonnes)],
+      ['Waste', formatTonnes(result.wasteTonnes)],
+      ['Strip ratio', Number.isFinite(result.stripRatio) ? result.stripRatio.toFixed(2) : '–'],
+      ['Ore grade', Number.isNaN(result.oreGrade) ? '–' : formatGrade(result.oreGrade)],
+    ])
+  } else {
+    pitSlope.textContent = ''
+    renderRows(reserves, [])
+  }
   viewer.requestRender()
 }
 
-function show(next: BlockModel, message: string): void {
-  view?.dispose()
-  model = next
-  view = new BlockModelView(next)
-  viewer.setContent(view.mesh, view.bounds())
+function buildPitControls(current: Session, bounds: THREE.Box3): void {
+  const { model, pit } = current
+  const [dx, dy, dz] = model.size
+  const [originX, originY, originZ] = model.origin
+  const metres = (value: number) => `${value} m`
+  const slider = (key: keyof PitParams, options: Omit<SliderOptions, 'value'>) => {
+    pit[key] = addSlider(pitControls, { ...options, value: pit[key] }, (value) => {
+      pit[key] = value
+      refresh()
+    })
+  }
 
-  legendTitle.textContent = next.gradeName
-  legendMin.textContent = formatGrade(next.gradeMin)
-  legendMax.textContent = formatGrade(next.gradeMax)
+  pitControls.replaceChildren()
+  slider('centerX', {
+    label: 'Centre easting',
+    min: bounds.min.x,
+    max: bounds.max.x,
+    step: dx,
+    format: (value) => (value + originX).toFixed(0),
+  })
+  slider('centerY', {
+    label: 'Centre northing',
+    min: bounds.min.y,
+    max: bounds.max.y,
+    step: dy,
+    format: (value) => (value + originY).toFixed(0),
+  })
+  slider('floorZ', {
+    label: 'Floor elevation',
+    min: bounds.min.z,
+    max: bounds.max.z,
+    step: dz,
+    format: (value) => `${(value + originZ).toFixed(0)} m`,
+  })
+  const span = Math.max(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y)
+  const floorStep = Math.min(dx, dy)
+  slider('floorLength', { label: 'Floor length', min: floorStep, max: span, step: floorStep, format: metres })
+  slider('floorWidth', { label: 'Floor width', min: floorStep, max: span, step: floorStep, format: metres })
+  slider('azimuth', { label: 'Floor azimuth', min: 0, max: 175, step: 5, format: (value) => `${value}°` })
+  slider('benchHeight', { label: 'Bench height', min: dz, max: dz * 4, step: dz, format: metres })
+  slider('bermWidth', { label: 'Berm width', min: 0, max: 20, step: 0.5, format: metres })
+  slider('faceAngle', { label: 'Face angle', min: 30, max: 85, step: 1, format: (value) => `${value}°` })
 
-  cutoff.min = String(next.gradeMin)
-  cutoff.max = String(next.gradeMax)
-  cutoff.step = String((next.gradeMax - next.gradeMin) / 200 || 1)
-  cutoff.value = String(next.gradeMin)
-  applyCutoff()
+  reserveControls.replaceChildren()
+  density = addSlider(
+    reserveControls,
+    { label: 'Density', min: 1.5, max: 4.5, step: 0.05, value: density, format: (value) => `${value.toFixed(2)} t/m³` },
+    (value) => {
+      density = value
+      refresh()
+    },
+  )
+}
+
+function show(model: BlockModel, message: string): void {
+  session?.view.dispose()
+  const view = new BlockModelView(model)
+  const bounds = view.bounds()
+  session = { model, view, topography: buildTopography(model), pit: defaultPitParams(model, bounds) }
+  viewer.setContent(view.mesh, bounds)
+
+  legendTitle.textContent = model.gradeName
+  legendMin.textContent = formatGrade(model.gradeMin)
+  legendMax.textContent = formatGrade(model.gradeMax)
+
+  cutoff.min = String(model.gradeMin)
+  cutoff.max = String(model.gradeMax)
+  cutoff.step = String((model.gradeMax - model.gradeMin) / 200 || 1)
+  cutoff.value = String(model.gradeMin)
+
+  buildPitControls(session, bounds)
+  refresh()
   setStatus(message)
 }
 
-cutoff.addEventListener('input', applyCutoff)
+cutoff.addEventListener('input', refresh)
+pitEnabled.addEventListener('change', refresh)
+blockMode.addEventListener('change', refresh)
 
 sampleButton.addEventListener('click', () => show(createSampleModel(), 'Sample model loaded.'))
 
@@ -94,9 +202,9 @@ fileInput.addEventListener('change', async () => {
   fileInput.value = ''
   if (!file) return
   try {
-    const { model: parsed, skipped } = parseBlockModelCsv(await file.text())
+    const { model, skipped } = parseBlockModelCsv(await file.text())
     const note = skipped > 0 ? ` (${integer.format(skipped)} invalid rows skipped)` : ''
-    show(parsed, `${file.name} loaded${note}.`)
+    show(model, `${file.name} loaded${note}.`)
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), true)
   }
